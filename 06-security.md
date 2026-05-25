@@ -69,15 +69,63 @@ openssl x509 -in cert.crt -text -noout
 
 ## Certificates API
 
-Kubernetes can manage certificate requests via `CertificateSigningRequest` objects.
+Kubernetes manages certificate requests via `CertificateSigningRequest` (CSR) objects. The full workflow: generate a key + CSR → create the K8s object → approve → extract the signed cert.
 
-Useful commands:
+**Step 1 — Generate a private key and certificate signing request:**
+```bash
+openssl genrsa -out myuser.key 2048
+openssl req -new -key myuser.key -out myuser.csr -subj "/CN=myuser/O=dev-team"
+# /CN becomes the username in Kubernetes; /O becomes the group
+```
+
+**Step 2 — Create the CertificateSigningRequest object:**
+```bash
+cat myuser.csr | base64 | tr -d "\n"    # get the base64-encoded CSR
+```
+
+```yaml
+apiVersion: certificates.k8s.io/v1
+kind: CertificateSigningRequest
+metadata:
+  name: myuser
+spec:
+  request: <base64-encoded-csr-from-above>
+  signerName: kubernetes.io/kube-apiserver-client
+  expirationSeconds: 86400   # 24 hours; optional
+  usages:
+  - client auth
+```
 
 ```bash
-kubectl get csr
-kubectl describe csr <name>
-kubectl certificate approve <name>
+kubectl apply -f myuser-csr.yaml
 ```
+
+**Step 3 — Inspect and approve:**
+```bash
+kubectl get csr                        # status shows Pending
+kubectl certificate approve myuser     # or: kubectl certificate deny myuser
+kubectl get csr                        # status shows Approved,Issued
+```
+
+**Step 4 — Extract the signed certificate:**
+```bash
+kubectl get csr myuser -o jsonpath='{.status.certificate}' | base64 --decode > myuser.crt
+```
+
+**Step 5 — Use the cert in kubeconfig (optional but commonly tested):**
+```bash
+kubectl config set-credentials myuser \
+  --client-certificate=myuser.crt \
+  --client-key=myuser.key
+
+kubectl config set-context myuser-context \
+  --cluster=kubernetes \
+  --user=myuser
+
+kubectl config use-context myuser-context
+```
+
+> [!note] The `signerName: kubernetes.io/kube-apiserver-client` is for user client certs. CSR objects auto-delete: approved ones after 1 hour, pending ones after 24 hours.
 
 ---
 
@@ -268,8 +316,11 @@ kubectl describe networkpolicy <name>
 ```
 
 > [!warning] Huge gotcha
-> A NetworkPolicy only works if your CNI plugin **enforces** it.  
-> Some CNIs support policies; some do not.
+> A NetworkPolicy only works if your CNI plugin **enforces** it.
+> - **Enforce policies:** Calico, Cilium, Weave Net, Kube-router
+> - **Does NOT enforce policies:** Flannel
+>
+> Flannel accepts the NetworkPolicy objects but silently ignores them — traffic still flows freely. If you apply a policy and it has no effect, check your CNI first.
 
 ---
 

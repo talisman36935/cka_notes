@@ -90,17 +90,19 @@ kubectl get all --all-namespaces -o yaml > all-resources.yaml
 Authenticated example:
 
 ```bash
-ETCDCTL_API=3 etcdctl snapshot save snapshot.db \
+export ETCDCTL_API=3
+
+etcdctl snapshot save snapshot.db \
   --endpoints=https://127.0.0.1:2379 \
-  --cacert=/etc/etcd/ca.crt \
-  --cert=/etc/etcd/etcd-server.crt \
-  --key=/etc/etcd/etcd-server.key
+  --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+  --cert=/etc/kubernetes/pki/etcd/server.crt \
+  --key=/etc/kubernetes/pki/etcd/server.key
 ```
 
 ### `etcd` restore
 
 ```bash
-ETCDCTL_API=3 etcdctl snapshot restore snapshot.db \
+etcdutl snapshot restore snapshot.db \
   --data-dir /var/lib/etcd-from-backup
 ```
 

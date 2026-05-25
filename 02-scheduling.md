@@ -266,3 +266,89 @@ Examples:
 > Authentication = who are you?  
 > Authorization = what can you do?  
 > Admission = should this request be allowed or modified?
+
+---
+
+## Resource requests, limits, LimitRange, ResourceQuota
+
+### Requests and limits
+
+Set on individual containers. The scheduler uses **requests** to decide placement; **limits** cap actual usage at runtime.
+
+```yaml
+resources:
+  requests:
+    cpu: "250m"       # 250 millicores = 0.25 of a CPU
+    memory: "64Mi"
+  limits:
+    cpu: "500m"
+    memory: "128Mi"
+```
+
+**CPU units:** `1` = one core, `500m` = half a core, `100m` = 0.1 core  
+**Memory units:** `Mi` = mebibytes, `Gi` = gibibytes, `M`/`G` = megabytes/gigabytes (avoid `M`/`G` — use `Mi`/`Gi`)
+
+**What happens when you exceed the limit:**
+- **CPU:** throttled (pod keeps running, just slower)
+- **Memory:** OOMKilled — container is terminated and restarted (shows `OOMKilled` in `kubectl describe pod`)
+
+**What happens with no limits set:**
+- Pod can consume all CPU/memory on the node — it will starve other pods
+
+**If only limits are set (no requests):** Kubernetes sets request = limit automatically.
+
+### LimitRange
+
+Sets **namespace-level defaults** for containers that don't specify their own requests/limits. Applied by the `LimitRanger` admission controller to newly created pods.
+
+```yaml
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: mem-cpu-defaults
+  namespace: dev
+spec:
+  limits:
+  - type: Container
+    default:          # applied as limit if none set
+      cpu: "500m"
+      memory: "128Mi"
+    defaultRequest:   # applied as request if none set
+      cpu: "250m"
+      memory: "64Mi"
+    max:              # pods requesting more than this are rejected
+      cpu: "1"
+      memory: "512Mi"
+    min:              # pods requesting less than this are rejected
+      cpu: "50m"
+      memory: "16Mi"
+```
+
+> [!note] LimitRange only affects **newly created** pods. Existing pods are not updated.
+
+### ResourceQuota
+
+Sets **hard limits on total resource consumption** across all pods in a namespace. Applied by the `ResourceQuota` admission controller.
+
+```yaml
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: ns-quota
+  namespace: dev
+spec:
+  hard:
+    pods: "10"
+    requests.cpu: "4"
+    requests.memory: "4Gi"
+    limits.cpu: "8"
+    limits.memory: "8Gi"
+    count/persistentvolumeclaims: "5"
+```
+
+```bash
+kubectl get resourcequota -n dev
+kubectl describe resourcequota ns-quota -n dev    # shows Used vs Hard
+```
+
+> [!warning] If a namespace has a ResourceQuota for CPU/memory, every pod in that namespace **must** specify requests and limits — pods without them will be rejected.

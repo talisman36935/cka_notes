@@ -266,6 +266,87 @@ kubectl rollout undo deployment web
 
 ---
 
+## StatefulSets
+
+StatefulSets manage pods that need **stable, persistent identity** — each pod gets a fixed name, hostname, and its own PVC that survives rescheduling.
+
+Use when: databases, message queues, any app that needs to know which replica it is.  
+Use Deployment when: stateless apps where all replicas are interchangeable.
+
+| | Deployment | StatefulSet |
+|---|---|---|
+| Pod names | Random suffix (`web-6d4bf`) | Ordinal index (`web-0`, `web-1`) |
+| Scaling order | Unordered | Sequential (0→1→2 up, 2→1→0 down) |
+| Storage | Shared or none | Unique PVC per pod (persists on delete) |
+| DNS | Single Service hostname | Per-pod DNS: `<pod>.<service>.<ns>.svc.cluster.local` |
+
+### Requirements
+
+StatefulSets **require** a headless Service (`clusterIP: None`) to provide per-pod DNS:
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql
+spec:
+  clusterIP: None        # headless — no load balancing, just DNS
+  selector:
+    app: mysql
+  ports:
+  - port: 3306
+```
+
+### StatefulSet YAML
+
+```yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql
+spec:
+  serviceName: "mysql"     # must match the headless Service name
+  replicas: 3
+  selector:
+    matchLabels:
+      app: mysql
+  template:
+    metadata:
+      labels:
+        app: mysql
+    spec:
+      containers:
+      - name: mysql
+        image: mysql:8.0
+        ports:
+        - containerPort: 3306
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/mysql
+  volumeClaimTemplates:    # creates a unique PVC for each pod
+  - metadata:
+      name: data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      storageClassName: standard
+      resources:
+        requests:
+          storage: 10Gi
+```
+
+**Resulting pod DNS names:** `mysql-0.mysql.default.svc.cluster.local`, `mysql-1.mysql...` etc.  
+**Resulting PVC names:** `data-mysql-0`, `data-mysql-1`, `data-mysql-2`
+
+> [!warning] Deleting a StatefulSet does **not** delete its PVCs — data is preserved intentionally. Delete PVCs manually if you want to clean up storage.
+
+```bash
+kubectl get statefulsets
+kubectl describe statefulset mysql
+kubectl scale statefulset mysql --replicas=5
+```
+
+---
+
 ## Services
 
 A Service gives stable networking to a changing set of Pods.
@@ -307,6 +388,94 @@ kubectl get endpoints web
 > - Pods are not Ready
 > - wrong labels on Pods
 > - wrong namespace
+
+---
+
+## Jobs and CronJobs
+
+### Job
+
+A Job runs a pod to **completion** rather than keeping it running. The controller retries on failure until the desired number of successful completions is reached.
+
+Key fields:
+
+| Field | Purpose | Default |
+|---|---|---|
+| `completions` | Total successful completions needed | 1 |
+| `parallelism` | Pods running simultaneously | 1 |
+| `backoffLimit` | Max retries before the Job is marked failed | 6 |
+| `restartPolicy` | Must be `Never` or `OnFailure` (not `Always`) | — |
+
+`Never` → failed pod is left for inspection, a new pod is created for each retry.  
+`OnFailure` → failed pod restarts in-place.
+
+```yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: pi
+spec:
+  completions: 3
+  parallelism: 2
+  backoffLimit: 4
+  template:
+    spec:
+      containers:
+      - name: pi
+        image: perl:5.34
+        command: ["perl", "-Mbignum=bpi", "-wle", "print bpi(2000)"]
+      restartPolicy: Never
+```
+
+```bash
+# Imperative
+kubectl create job pi --image=perl:5.34 -- perl -Mbignum=bpi -wle "print bpi(2000)"
+
+kubectl get jobs
+kubectl describe job pi
+kubectl get pods --selector=batch.kubernetes.io/job-name=pi
+kubectl logs jobs/pi          # logs from the job's pod
+```
+
+### CronJob
+
+A CronJob creates a Job on a schedule. The `schedule` field uses standard cron syntax.
+
+```
+┌─ minute (0-59)
+│ ┌─ hour (0-23)
+│ │ ┌─ day of month (1-31)
+│ │ │ ┌─ month (1-12)
+│ │ │ │ ┌─ day of week (0-6, Sunday=0)
+* * * * *
+```
+
+```yaml
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: hello
+spec:
+  schedule: "*/5 * * * *"    # every 5 minutes
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: hello
+            image: busybox
+            command: ["echo", "hello"]
+          restartPolicy: OnFailure
+```
+
+```bash
+kubectl create cronjob hello --image=busybox --schedule="*/5 * * * *" -- echo hello
+
+kubectl get cronjobs
+kubectl get jobs          # jobs created by the cronjob appear here
+```
+
+> [!warning] Jobs require `restartPolicy: Never` or `OnFailure`. The default `Always` is invalid for Jobs and CronJobs and will cause a validation error.
 
 ---
 

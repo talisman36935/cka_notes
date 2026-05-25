@@ -8,3 +8,6 @@
 > - create and test RBAC quickly
 > - drain / uncordon nodes safely
 > - restore `etcd` confidently
+
+
+https://dev.to/jumptotech/cka-simulation-standard-100-labs-2ba4
