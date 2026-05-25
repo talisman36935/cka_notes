@@ -1,3 +1,12 @@
+---
+tags:
+  - kubernetes
+  - cka
+  - study-guide
+aliases:
+  - CKA Guide
+  - Certified Kubernetes Administrator Guide
+---
 
 > [!info] Session notes — 25 May 2026
 >
