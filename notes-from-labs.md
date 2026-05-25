@@ -37,6 +37,44 @@ rm /etc/kubernetes/manifests/static-busybox.yaml
 
 ---
 
+### Rolling Updates & Rollouts
+
+```bash
+# Update a container's image (triggers rolling update)
+kubectl set image deployment/nginx-deploy nginx=nginx:1.17
+
+# Record the reason — use annotate, not --record (deprecated in newer clusters)
+kubectl annotate deployment nginx-deploy kubernetes.io/change-cause="Updated nginx image to 1.17"
+
+# Monitor rollout progress
+kubectl rollout status deployment/nginx-deploy
+
+# View rollout history (change-cause annotation appears in the CHANGE-CAUSE column)
+kubectl rollout history deployment nginx-deploy
+
+# Rollback to previous version
+kubectl rollout undo deployment nginx-deploy
+
+# Restart all pods in a deployment (e.g. to pick up a ConfigMap change)
+kubectl rollout restart deployment/nginx-deploy
+
+# Check current container image via JSONPath
+kubectl get deployment nginx-deploy \
+  -o=jsonpath='{.spec.template.spec.containers[0].image}'
+
+# Safely pause a deployment before editing (scale to 0, edit, scale back)
+kubectl scale deployment wordpress --replicas=0
+# ... make edits ...
+kubectl scale deployment wordpress --replicas=3
+kubectl rollout status deployment/wordpress
+```
+
+> [!note] `--record` is deprecated — use `kubectl annotate` with `kubernetes.io/change-cause` instead to populate rollout history.
+
+> [!warning] Pods do **not** automatically pick up ConfigMap changes — you must `rollout restart` the deployment for new config to take effect.
+
+---
+
 ### Priority Classes
 
 ```yaml
@@ -51,9 +89,54 @@ description: "High priority workloads"
 ```
 
 ```bash
+# Imperative creation
+kubectl create priorityclass high-priority --value=999 --description="high priority"
+
+# List all priority classes
+kubectl get pc
+
+# Apply to an existing deployment via patch
+kubectl patch deployment busybox-logger -n priority \
+  -p '{"spec":{"template":{"spec":{"priorityClassName":"high-priority"}}}}'
+
+# Verify
+kubectl describe deployment busybox-logger -n priority | grep -i "priority class"
+
 # Compare priority classes across pods
 kubectl get pods -o custom-columns="NAME:.metadata.name,PRIORITY:.spec.priorityClassName"
 ```
+
+---
+
+### Taints & Tolerations
+
+```bash
+# Taint a node — effect options: NoSchedule | PreferNoSchedule | NoExecute
+kubectl taint nodes node01 key=value:NoSchedule
+
+# Remove a taint (append -)
+kubectl taint nodes node01 key=value:NoSchedule-
+
+# Verify
+kubectl describe node node01 | grep -i taint
+```
+
+**Pod with a matching toleration:**
+```yaml
+spec:
+  tolerations:
+  - key: "key"
+    operator: "Equal"
+    value: "value"
+    effect: "NoSchedule"
+  containers:
+  - name: nginx
+    image: nginx
+```
+
+> [!note] A toleration allows a pod to *land* on a tainted node — it doesn't force it there. Use `nodeSelector` or `nodeAffinity` if you need to guarantee placement.
+
+> [!warning] A pod without a matching toleration stays `Pending` on a cluster where all nodes are tainted — a common exam trap.
 
 ---
 
@@ -71,7 +154,7 @@ Mutating webhooks run first, then validating webhooks.
 ### HPA & VPA
 
 ```bash
-# Create an HPA
+# Create an HPA (imperative)
 kubectl autoscale deployment nginx-deployment --max=3 --cpu-percent=80
 
 # Generate manifest
@@ -82,13 +165,39 @@ kubectl autoscale deployment nginx-deployment --max=3 --cpu-percent=80 \
 kubectl get hpa --watch
 
 # Debug metric issues
-kubectl events hpa nginx-deployment | grep -i "FailedGetResourceMetric"
+kubectl events --for=hpa/nginx-deployment | grep -i "FailedGetResourceMetric"
 
 # Check VPA updater logs
 kubectl logs \
   $(kubectl get pods -n kube-system --no-headers \
     -o custom-columns=":metadata.name" | grep vpa-updater) \
   -n kube-system
+```
+
+**HPA YAML (`autoscaling/v2`) with scale-down stabilization:**
+```yaml
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: apache-hpa
+  namespace: autoscale
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: apache-deployment
+  minReplicas: 1
+  maxReplicas: 4
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 50
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 30    # prevents flapping on scale-down
 ```
 
 ---
@@ -220,6 +329,25 @@ env:
       key: DB_Password
 ```
 
+**Mounted as a read-only volume:**
+```yaml
+spec:
+  containers:
+  - name: secret-admin
+    image: busybox
+    command: ["sh", "-c", "sleep 4800"]    # busybox exits immediately without a running process
+    volumeMounts:
+    - name: secret-volume
+      mountPath: /etc/secret-volume
+      readOnly: true                        # exam questions often explicitly require this
+  volumes:
+  - name: secret-volume
+    secret:
+      secretName: dotfile-secret           # name must match the binding in volumeMounts
+```
+
+> [!warning] Dotfile secrets won't show with plain `ls` — use `ls -la /etc/secret-volume`
+
 ---
 
 ## Volumes & Storage
@@ -322,7 +450,7 @@ kind: PersistentVolume
 metadata:
   name: pv-log
 spec:
-  persistentVolumeReclaimPolicy: Retain    # Retain | Delete | Recycle
+  persistentVolumeReclaimPolicy: Retain    # Retain | Delete | Recycle (deprecated)
   accessModes:
   - ReadWriteMany                           # must match the PVC
   capacity:
@@ -360,6 +488,7 @@ volumes:
 | `ReadWriteOnce` | RWO | Read/write by one node at a time |
 | `ReadOnlyMany` | ROX | Read-only by many nodes |
 | `ReadWriteMany` | RWX | Read/write by many nodes |
+| `ReadWriteOncePod` | RWOP | Read/write by a single Pod (most restrictive) |
 
 > [!warning] Common binding failures
 > - `accessModes` mismatch between PV and PVC → PVC stays `Pending`
@@ -375,6 +504,19 @@ kubectl get sc    # look for provisioner = kubernetes.io/no-provisioner (no dyna
 ```
 
 > [!note] `WaitForFirstConsumer` binding mode delays PV creation until a Pod using the PVC is scheduled. Common with the `local-path` StorageClass.
+
+**Set or change the default StorageClass:**
+```bash
+# Set a StorageClass as default
+kubectl patch sc local-storage \
+  -p '{"metadata":{"annotations":{"storageclass.kubernetes.io/is-default-class":"true"}}}'
+
+# Remove default from the old one (only one should be default at a time)
+kubectl patch sc local-path \
+  -p '{"metadata":{"annotations":{"storageclass.kubernetes.io/is-default-class":"false"}}}'
+
+kubectl get sc    # verify — default shows as (default) in the NAME column
+```
 
 ---
 
@@ -705,6 +847,9 @@ ls /opt/cni/bin
 
 # Find Pod CIDR range (more reliable than reading canal logs)
 cat /etc/kubernetes/manifests/kube-controller-manager.yaml | grep cluster-cidr
+
+# Install flannel
+kubectl apply -f https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml
 ```
 
 > [!note] etcd ports
@@ -723,9 +868,47 @@ kubectl logs -n kube-system kube-proxy-<id>
 
 ---
 
+### Services — NodePort
+
+```bash
+# Imperative expose (port and targetPort required; nodePort assigned randomly)
+kubectl expose deployment echo -n echo-sound \
+  --name echo-service --type NodePort --port 8080 --target-port 8080
+
+# Add a containerPort spec to an existing deployment (required before some exams check it)
+kubectl patch deployment nodeport-deployment -n relative -p \
+  '{"spec":{"template":{"spec":{"containers":[{"name":"nginx","ports":[{"name":"http","containerPort":80,"protocol":"TCP"}]}]}}}}'
+```
+
+**NodePort service YAML — use when you need to pin the nodePort:**
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: nodeport-service
+  namespace: relative
+spec:
+  type: NodePort
+  selector:
+    app: nodeport-deployment
+  ports:
+  - port: 80
+    targetPort: 80
+    protocol: TCP
+    nodePort: 30080    # explicit port — omit to let k8s assign one
+```
+
+---
+
 ### Ingress
 
-> [!note] No imperative command for Ingress — YAML only
+```bash
+# Imperative — generates a basic Ingress (since k8s 1.19)
+kubectl create ingress web-app-ingress --namespace=webapp \
+  --rule="app.kodekloud.local/=web-app:80" \
+  --class=nginx \
+  --dry-run=client -o yaml > ingress.yaml
+```
 
 **Basic Ingress:**
 ```yaml
@@ -813,19 +996,55 @@ spec:
       port: 80
 ```
 
-**TLS termination with Gateway API** — config lives on the Gateway, not the Route:
+**Full Gateway with TLS termination:**
 ```yaml
-# Gateway listener
-listeners:
-- name: https
-  port: 443
-  protocol: HTTPS
-  tls:
-    mode: Terminate
-    certificateRefs:
-    - name: app-tls    # Secret name
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: web-gateway
+spec:
+  gatewayClassName: nginx-class
+  listeners:
+  - name: https
+    protocol: HTTPS
+    port: 443
+    hostname: gateway.web.k8s.local    # hostname filter on the listener
+    tls:
+      mode: Terminate
+      certificateRefs:
+      - kind: Secret
+        name: web-tls
+```
 
-# HTTPRoute just references the gateway — no TLS config needed here
+**HTTPRoute that attaches to it:**
+```yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: web-route
+spec:
+  parentRefs:
+  - name: web-gateway
+  hostnames:
+  - "gateway.web.k8s.local"
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /
+    backendRefs:
+    - name: web-service
+      port: 80
+```
+
+```bash
+# Inspect before migrating from Ingress
+kubectl describe ingress web
+kubectl describe secret web-tls
+
+# Verify after applying
+kubectl describe gateway web-gateway
+kubectl describe httproute web-route
 ```
 
 > [!note]
@@ -859,39 +1078,76 @@ source ~/.bashrc
 > - `apt-mark hold` — pins packages so `apt upgrade` won't auto-update them (critical for k8s)
 > - `apt-mark unhold` — unpin before upgrading, then re-hold afterward
 
+> [!important] Upgrade order: **first control plane → additional control planes → workers**. Never skip a minor version.
+
+#### Control Plane (first node)
+
 **Step 1: Update the apt repo URL to the new minor version**
 ```bash
 vim /etc/apt/sources.list.d/kubernetes.list
 # Change v1.34 → v1.35 in the URL, save and exit
 ```
 
-**Step 2: Drain the node**
+**Step 2: Upgrade kubeadm** (unhold → install → re-hold)
+```bash
+apt-get update
+apt-cache madison kubeadm              # find exact version string, e.g. 1.35.0-1.1
+apt-mark unhold kubeadm
+apt-get install -y kubeadm=1.35.0-1.1
+apt-mark hold kubeadm
+```
+
+**Step 3: Apply the upgrade** — do this *before* draining
+```bash
+kubeadm upgrade plan
+kubeadm upgrade apply v1.35.0
+```
+
+**Step 4: Drain the control plane node**
 ```bash
 kubectl drain controlplane --ignore-daemonsets
 ```
 
-**Step 3: Upgrade kubeadm**
+**Step 5: Upgrade kubelet and kubectl, reload, uncordon**
 ```bash
-apt-get update
-apt-cache madison kubeadm              # find exact version string, e.g. 1.35.0-1.1
-apt-get install kubeadm=1.35.0-1.1
-```
-
-**Step 4: Apply the upgrade**
-```bash
-kubeadm upgrade plan v1.35.0
-kubeadm upgrade apply v1.35.0
-```
-
-**Step 5: Upgrade kubelet, reload, uncordon**
-```bash
-apt-get install kubelet=1.35.0-1.1
+apt-mark unhold kubelet kubectl
+apt-get install -y kubelet=1.35.0-1.1 kubectl=1.35.0-1.1
+apt-mark hold kubelet kubectl
 systemctl daemon-reload
 systemctl restart kubelet
 kubectl uncordon controlplane
 ```
 
-> [!tip] For worker nodes: drain from controlplane → SSH to worker → upgrade kubelet → reload → uncordon from controlplane.
+#### Additional Control Plane Nodes
+
+Same as above **except**: use `kubeadm upgrade node` instead of `kubeadm upgrade apply` (skip the `plan` step too).
+
+#### Worker Nodes
+
+```bash
+# From controlplane: drain the worker first
+kubectl drain node01 --ignore-daemonsets
+
+# SSH to the worker node
+ssh node01
+
+# Update repo URL, then upgrade kubeadm (same unhold → install → hold pattern)
+apt-mark unhold kubeadm && apt-get update && \
+  apt-get install -y kubeadm=1.35.0-1.1 && apt-mark hold kubeadm
+
+# Run node upgrade — workers always use 'upgrade node', never 'upgrade apply'
+kubeadm upgrade node
+
+# Upgrade kubelet and kubectl
+apt-mark unhold kubelet kubectl
+apt-get install -y kubelet=1.35.0-1.1 kubectl=1.35.0-1.1
+apt-mark hold kubelet kubectl
+systemctl daemon-reload
+systemctl restart kubelet
+
+# Back on controlplane: uncordon
+kubectl uncordon node01
+```
 
 ---
 
@@ -899,6 +1155,8 @@ kubectl uncordon controlplane
 
 **Backup:**
 ```bash
+export ETCDCTL_API=3
+
 etcdctl \
   --endpoints=https://127.0.0.1:2379 \
   --cacert=/etc/kubernetes/pki/etcd/ca.crt \
@@ -1044,6 +1302,10 @@ kubectl logs <pod>
 kubectl logs <pod> -c <container>    # multi-container pod
 kubectl logs <pod> --previous        # logs from the previous container instance
 
+# Control plane component logs (when kubectl is unavailable)
+journalctl -u kube-apiserver | tail
+journalctl -u kubelet | tail
+
 # When kube-apiserver is down, use crictl
 crictl ps -a
 crictl logs <container-id>
@@ -1087,6 +1349,12 @@ kubectl config view --kubeconfig=my-kube-config \
   -o jsonpath="{.contexts[?(@.context.user=='aws-user')].name}"
 ```
 
+```bash
+# Extract a single field into a shell variable
+IP=$(kubectl get svc nginx-static -n nginx-static -o jsonpath='{.spec.clusterIP}')
+echo "$IP myhost.k8s.local" | sudo tee -a /etc/hosts
+```
+
 | JSONPath syntax | Meaning |
 |---|---|
 | `.items[*]` | All items in a list |
@@ -1096,12 +1364,29 @@ kubectl config view --kubeconfig=my-kube-config \
 
 ---
 
+### kubectl explain
+
+```bash
+# Explain a resource field (useful for finding correct YAML keys mid-exam)
+kubectl explain pod.spec.containers
+kubectl explain pod.spec.containers.resources
+kubectl explain certificate.spec.subject    # works for CRDs too
+
+# Save explain output to a file
+kubectl explain certificate.spec.subject | tee /root/subject.yaml
+```
+
+---
+
 ### Custom Columns & sort-by
 
 ```bash
 # Custom columns — NAME:.path.to.field
 kubectl get pods -o custom-columns="NAME:.metadata.name,NODE:.spec.nodeName"
 kubectl get pods -o custom-columns="NAME:.metadata.name,PRIORITY:.spec.priorityClassName"
+
+# for no column names
+--no-headers 
 
 # Sort by a field
 kubectl get pv --sort-by=.spec.capacity.storage
@@ -1147,6 +1432,12 @@ helm upgrade dazzling-web bitnami/nginx --version 18.3.6
 # List installed releases
 helm list
 helm list -A    # all namespaces
+
+# Render chart manifests to stdout without installing (useful for inspection or piping)
+helm template argocd argo/argo-cd \
+  --version 7.7.3 \
+  --set crds.install=false \
+  --namespace argocd > /root/argo-helm.yaml
 ```
 
 ---
