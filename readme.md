@@ -21,7 +21,7 @@ aliases:
 > **Corrections to `05-cluster-maintenance.md`**
 > - etcd backup/restore: changed inline `ETCDCTL_API=3` to `export ETCDCTL_API=3`; fixed cert paths from `/etc/etcd/` to `/etc/kubernetes/pki/etcd/`; switched restore command from `etcdctl` to `etcdutl`
 >
-> **New file: [[appendix-d-jsonpath-and-mental-models]]**
+> **New file: [[Appendices/appendix-d-jsonpath-and-mental-models]]**
 > - JSONPath deep reference: single-object vs list distinction, syntax table, 6 named patterns, 10 exam-critical copy-paste examples, custom columns and sort-by
 > - 11 holistic mental models: label glue, volume binding name-as-key, PV→PVC→Pod chain, scheduler decision tree, network traffic path, auth pipeline, namespaced vs cluster-scoped, certificate hierarchy, static pod pattern, the control loop, NetworkPolicy AND/OR YAML trap
 >
@@ -72,21 +72,37 @@ aliases:
 
 ## Table of contents
 
-- [[01-core-concepts|✅ Core Concepts]]
-- [[02-scheduling|✅ Scheduling]]
-- [[03-logging-monitoring|✅ Logging & Monitoring]]
-- [[04-application-lifecycle|✅ Application Lifecycle Management]]
-- [[05-cluster-maintenance|✅ Cluster Maintenance]]
-- [[06-security|✅ Security]]
-- [[07-storage|✅ Storage]]
-- [[08-networking|✅ Networking]]
-- [[09-troubleshooting|✅ Troubleshooting]]
-- [[10-design-install|✅ Design and Install a Kubernetes Cluster]]
-- [[11-helm-basics|✅ Helm Basics]]
-- [[12-kustomize-basics|✅ Kustomize Basics]]
-- [[13-exam-priority|✅ Exam Priority Guide]]
-- [[14-final-rule|✅ Final Rule]]
-- [[appendix-a-speed-drills|⚡ Appendix A — Speed Drills]]
-- [[appendix-b-crash-plan|📅 Appendix B — 1-Week Crash Plan]]
-- [[appendix-c-debug-flows|🧠 Appendix C — Default Debug Flows]]
-- [[final-reminder|🏁 Final Reminder]]
+### Study guide
+
+- [[Study-guide/01-core-concepts|✅ Core Concepts]]
+- [[Study-guide/02-scheduling|✅ Scheduling]]
+- [[Study-guide/03-logging-monitoring|✅ Logging & Monitoring]]
+- [[Study-guide/04-application-lifecycle|✅ Application Lifecycle Management]]
+- [[Study-guide/05-cluster-maintenance|✅ Cluster Maintenance]]
+- [[Study-guide/06-security|✅ Security]]
+- [[Study-guide/07-storage|✅ Storage]]
+- [[Study-guide/08-networking|✅ Networking]]
+- [[Study-guide/09-troubleshooting|✅ Troubleshooting]]
+- [[Study-guide/10-design-install|✅ Design and Install a Kubernetes Cluster]]
+- [[Study-guide/11-helm-basics|✅ Helm Basics]]
+- [[Study-guide/12-kustomize-basics|✅ Kustomize Basics]]
+- [[Study-guide/13-exam-priority|✅ Exam Priority Guide]]
+- [[Study-guide/14-final-rule|✅ Final Rule]]
+
+### Appendices
+
+- [[Appendices/appendix-a-speed-drills|⚡ Appendix A — Speed Drills]]
+- [[Appendices/appendix-b-crash-plan|📅 Appendix B — 1-Week Crash Plan]]
+- [[Appendices/appendix-c-debug-flows|🧠 Appendix C — Default Debug Flows]]
+- [[Appendices/appendix-d-jsonpath-and-mental-models|🧭 Appendix D — JSONPath & Mental Models]]
+
+### Practice and reference
+
+- [[Practice-notes/notes-from-labs|🧪 Notes from Labs]]
+- [[Practice-notes/preparation-notes|📝 Preparation Notes]]
+- [[Reference/CKA resource linkage|🔗 CKA Resource Linkage]]
+
+### Quick reference
+
+- [[Quick-reference/CKA Cheat Sheet - Pass|📌 CKA Cheat Sheet — Pass]]
+- [[Quick-reference/final-reminder|🏁 Final Reminder]]
