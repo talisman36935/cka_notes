@@ -72,6 +72,12 @@ aliases:
 
 ## Table of contents
 
+### High-level workbooks
+
+- [[weaknesses|⚠️ CKA Weaknesses — Expanded Exam Workbook]]
+- [[NetworkPolicy Exam Tips|🛡️ NetworkPolicy Exam Tips & Recipes]]
+- [[CK-X Mock Markscheme|🧪 CK-X Mock Markscheme]]
+
 ### Study guide
 
 - [[Study-guide/01-core-concepts|✅ Core Concepts]]
